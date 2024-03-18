@@ -1,0 +1,8 @@
+[general]
+library_name = "librdkafka"
+output_file_path = "../src/generated/LibRDKafkaGen.jl"
+module_name = "LibRDKafkaGen"
+jll_pkg_name = "librdkafka_jll"
+export_symbol_prefixes = ["rd_kafka, RD_KAFKA"]
+output_ignorelist = ["RD_KAFKA_DEBUG_CONTEXTS", "RD_KAFKA_PARTITION_UA", "ERR_GROUP_LOAD_IN_PROGRESS", "ERR_GROUP_COORDINATOR_NOT_AVAILABLE", "ERR_NOT_COORDINATOR_FOR_GROUP"]
+prologue_file_path = "./prologue.jl"
