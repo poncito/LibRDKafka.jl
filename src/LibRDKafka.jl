@@ -174,20 +174,25 @@ function KafkaTopic(producer::KafkaHandle, topic; conf::AbstractDict = Dict())
 end
 
 function Base.put!(topic::KafkaTopic, key, payload, partition = RD_KAFKA_PARTITION_UA)
-    errno = rd_kafka_produce(
-        topic.ptr,
-        partition,
-        0,
-        payload |> pointer,
-        length(payload),
-        key |> pointer,
-        length(key),
-        C_NULL,
-    )
-    if errno == RD_KAFKA_RESP_ERR_NO_ERROR
+    GC.@preserve payload key begin
+        status = rd_kafka_produce(
+            topic.ptr,
+            partition,
+            RD_KAFKA_MSG_F_COPY,
+            payload |> pointer,
+            length(payload),
+            key |> pointer,
+            length(key),
+            C_NULL,
+        )
+    end
+    if status == RD_KAFKA_RESP_ERR_NO_ERROR
         return topic
     else
-        error("error number: $errno")
+        errno = rd_kafka_errno()
+        err = rd_kafka_errno2err(errno)
+        errstr = rd_kafka_err2str(err) |> UnsafeString
+        error("error number: $errno, error: $errstr, status: $status")
     end
 end
 
