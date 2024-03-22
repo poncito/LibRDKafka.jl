@@ -1,11 +1,24 @@
 module LibRDKafka
 
+using Dates
+
 include("generated/LibRDKafkaGen.jl")
 using .LibRDKafkaGen
 
 include("unsafestring.jl")
 
-export kafkaconsumer, kafkaproducer, KafkaTopic, KafkaSubscription
+export kafkaconsumer, kafkaproducer, KafkaTopic, KafkaTopicPartitionList
+
+_datetime2epoch(x::DateTime) = (Dates.value(x) - Dates.UNIXEPOCH)
+_epoch2datetime(x::Int) = DateTime(1970) + Millisecond(x)
+
+function try_throw_kafka_error(err::Union{Int32,rd_kafka_resp_err_t})
+    if err != RD_KAFKA_RESP_ERR_NO_ERROR
+        ptr = rd_kafka_err2str(err)
+        str = UnsafeString(ptr)
+        error(str)
+    end
+end
 
 function make_kafka_conf(conf::AbstractDict)
     ptr = rd_kafka_conf_new()
@@ -52,8 +65,23 @@ mutable struct KafkaTopicPartitionList
     end
 end
 
+function Base.push!(tpl::KafkaTopicPartitionList, topic::String, partition::Integer, offset::Integer)
+    push!(tpl, topic, partition)
+    setoffset!(tpl, topic, partition, offset)
+end
+
 function Base.push!(tpl::KafkaTopicPartitionList, topic::String, partition::Integer)
-    rd_kafka_topic_partition_list_add(tpl.ptr, pointer(topic), partition)
+    GC.@preserve topic begin
+        rd_kafka_topic_partition_list_add(tpl.ptr, pointer(topic), partition)
+    end
+end
+
+function setoffset!(tpl::KafkaTopicPartitionList, topic::String, partition::Integer, offset::Int)
+    GC.@preserve topic begin
+        err = rd_kafka_topic_partition_list_set_offset(tpl.ptr, pointer(topic), partition, offset)
+        try_throw_kafka_error(err)
+        tpl
+    end
 end
 
 mutable struct KafkaHandle
@@ -93,48 +121,52 @@ end
 
 function subscribe!(client::KafkaHandle, topicpartition::KafkaTopicPartitionList)
     err = rd_kafka_subscribe(client.ptr, topicpartition.ptr)
-    if err != RD_KAFKA_RESP_ERR_NO_ERROR
-        ptr = rd_kafka_err2str(err)
-        str = UnsafeString(ptr)
-        error(str)
-    end
+    try_throw_kafka_error(err)
     client
 end
 
-struct KafkaSubscription
-    topic::String
-    partition::Int
-end
 
-function subscribe!(client::KafkaHandle, subscriptions::AbstractVector{KafkaSubscription})
-    tpl = KafkaTopicPartitionList(length(subscriptions))
+"""
+    function settimestamp!(client::KafkaHandle, tpl::KafkaTopicPartitionList, timestamp::DateTime; timeout_ms = 1000) 
 
-    for s in subscriptions
-        push!(tpl, s.topic, s.partition)
+This method should be called after `subscribe!`.
+"""
+function settimestamp!(client::KafkaHandle, tpl::KafkaTopicPartitionList, timestamp::DateTime; timeout_ms = 1000) 
+    ts_int = _datetime2epoch(timestamp)
+    obj = unsafe_load(tpl.ptr)
+    for i = 0:obj.cnt-1
+        partition_ptr = obj.elems + 8 * i
+        unsafe_store!(Ptr{Int64}(partition_ptr + 16), ts_int) # todo: make this safer
     end
-    subscribe!(client, tpl)
-    client
+    err = rd_kafka_offsets_for_times(client.ptr, tpl.ptr, timeout_ms)
+    try_throw_kafka_error(err)
+    tpl
 end
 
 struct UnsafeKafkaMessage
-    raw::rd_kafka_message_t
+    ptr::Ptr{rd_kafka_message_t}
 end
 
-Base.propertynames(::UnsafeKafkaMessage) = (:topicname, :payload, :partition, :key, :offset)
+Base.propertynames(::UnsafeKafkaMessage) = (:payload, :partition, :key, :offset, :timestamp)
 
 function Base.getproperty(msg::UnsafeKafkaMessage, s::Symbol)
-    raw = getfield(msg, :raw)
-    if s == :topicname
-        ptr = rd_kafka_topic_name(raw.rkt)
-        UnsafeString(ptr)
-    elseif s == :payload
-        UnsafeString(raw.payload |> Ptr{UInt8}, raw.len)
+    ptr = getfield(msg, :ptr)
+    msg = unsafe_load(ptr)
+    @info "msg" msg
+    if s == :payload
+        UnsafeString(msg.payload |> Ptr{UInt8}, msg.len)
     elseif s == :key
-        UnsafeString(raw.key |> Ptr{UInt8}, raw.key_len)
+        UnsafeString(msg.key |> Ptr{UInt8}, msg.key_len)
     elseif s == :partition
-        Int(raw.partition)
+        Int(msg.partition)
     elseif s == :offset
-        raw.offset
+        msg.offset
+    elseif s == :timestamp
+        typeref = Ref{rd_kafka_timestamp_type_t}()
+        GC.@preserve typeref begin
+            time_ms = rd_kafka_message_timestamp(ptr, typeref)
+            _epoch2datetime(time_ms)
+        end
     else
         error("type UnsafeKafkaMessage has no property $s")
     end
@@ -143,7 +175,7 @@ end
 function Base.take!(handle::Function, client::KafkaHandle, timeout_ms)
     rkmessage = rd_kafka_consumer_poll(client.ptr, timeout_ms)
     if rkmessage != C_NULL
-        message = UnsafeKafkaMessage(unsafe_load(rkmessage))
+        message = UnsafeKafkaMessage(rkmessage)
         handle(message)
         rd_kafka_message_destroy(rkmessage)
         true
@@ -175,7 +207,7 @@ end
 
 function Base.put!(topic::KafkaTopic, key, payload, partition = RD_KAFKA_PARTITION_UA)
     GC.@preserve payload key begin
-        status = rd_kafka_produce(
+        err = rd_kafka_produce(
             topic.ptr,
             partition,
             RD_KAFKA_MSG_F_COPY,
@@ -186,14 +218,8 @@ function Base.put!(topic::KafkaTopic, key, payload, partition = RD_KAFKA_PARTITI
             C_NULL,
         )
     end
-    if status == RD_KAFKA_RESP_ERR_NO_ERROR
-        return topic
-    else
-        errno = rd_kafka_errno()
-        err = rd_kafka_errno2err(errno)
-        errstr = rd_kafka_err2str(err) |> UnsafeString
-        error("error number: $errno, error: $errstr, status: $status")
-    end
+    try_throw_kafka_error(err)
+    topic
 end
 
 # todo:

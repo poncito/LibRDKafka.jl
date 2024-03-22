@@ -14,7 +14,9 @@ groupid = "my_consumer_group_id"
 topic = "test"
 
 consumer = kafkaconsumer(brokers, groupid)
-LibRDKafka.subscribe!(consumer, [KafkaSubscription("test", 0)])
+subs = KafkaTopicPartitionList(1)
+push!(subs, "test", 0)
+LibRDKafka.subscribe!(consumer, subs)
 
 producer = kafkaproducer(brokers)
 topic = KafkaTopic(producer, topic)
