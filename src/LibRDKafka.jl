@@ -152,7 +152,6 @@ Base.propertynames(::UnsafeKafkaMessage) = (:payload, :partition, :key, :offset,
 function Base.getproperty(msg::UnsafeKafkaMessage, s::Symbol)
     ptr = getfield(msg, :ptr)
     msg = unsafe_load(ptr)
-    @info "msg" msg
     if s == :payload
         UnsafeString(msg.payload |> Ptr{UInt8}, msg.len)
     elseif s == :key
