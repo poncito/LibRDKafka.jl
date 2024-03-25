@@ -6,6 +6,7 @@ include("generated/LibRDKafkaGen.jl")
 using .LibRDKafkaGen
 
 include("unsafestring.jl")
+include("unsafevector.jl")
 
 export kafkaconsumer, kafkaproducer, KafkaTopic, KafkaTopicPartitionList
 
@@ -70,7 +71,7 @@ function Base.push!(tpl::KafkaTopicPartitionList, topic::String, partition::Inte
     setoffset!(tpl, topic, partition, offset)
 end
 
-function Base.push!(tpl::KafkaTopicPartitionList, topic::String, partition::Integer)
+function Base.push!(tpl::KafkaTopicPartitionList, topic::String, partition::Integer=RD_KAFKA_PARTITION_UA)
     GC.@preserve topic begin
         rd_kafka_topic_partition_list_add(tpl.ptr, pointer(topic), partition)
     end
@@ -136,9 +137,13 @@ function settimestamp!(client::KafkaHandle, tpl::KafkaTopicPartitionList, timest
     obj = unsafe_load(tpl.ptr)
     for i = 0:obj.cnt-1
         partition_ptr = obj.elems + 8 * i
+        @info "plop" unsafe_load(partition_ptr) ts_int
         unsafe_store!(Ptr{Int64}(partition_ptr + 16), ts_int) # todo: make this safer
+        @info "plop" unsafe_load(partition_ptr)
     end
+    @info "tick"
     err = rd_kafka_offsets_for_times(client.ptr, tpl.ptr, timeout_ms)
+    @info "err" err
     try_throw_kafka_error(err)
     tpl
 end
@@ -153,7 +158,7 @@ function Base.getproperty(msg::UnsafeKafkaMessage, s::Symbol)
     ptr = getfield(msg, :ptr)
     msg = unsafe_load(ptr)
     if s == :payload
-        UnsafeString(msg.payload |> Ptr{UInt8}, msg.len)
+        UnsafeVector(msg.payload |> Ptr{UInt8}, msg.len)
     elseif s == :key
         UnsafeString(msg.key |> Ptr{UInt8}, msg.key_len)
     elseif s == :partition
