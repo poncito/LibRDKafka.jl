@@ -126,6 +126,12 @@ function subscribe!(client::KafkaHandle, topicpartition::KafkaTopicPartitionList
     client
 end
 
+function assign!(client::KafkaHandle, topicpartition::KafkaTopicPartitionList)
+    err = rd_kafka_assign(client.ptr, topicpartition.ptr)
+    try_throw_kafka_error(err)
+    client
+end
+
 
 """
     function settimestamp!(client::KafkaHandle, tpl::KafkaTopicPartitionList, timestamp::DateTime; timeout_ms = 1000) 
