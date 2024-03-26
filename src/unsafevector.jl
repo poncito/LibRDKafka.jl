@@ -3,6 +3,8 @@ struct UnsafeVector{T} <: DenseVector{T}
     len::Int
 end
 
+UnsafeVector(ptr::Ptr, len::Integer) = UnsafeVector(ptr, convert(Int, len))
+
 Base.pointer(v::UnsafeVector) = v.ptr
 
 Base.size(v::UnsafeVector) = (v.len,)
