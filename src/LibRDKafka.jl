@@ -243,6 +243,14 @@ function Base.put!(topic::KafkaTopic, key, payload, partition = RD_KAFKA_PARTITI
     topic
 end
 
+function query_watermark_offsets(handle::KafkaHandle, topic::Union{String,UnsafeString}, partition::Integer, timeout_ms::Integer)
+    low = Ref{Int64}()
+    high = Ref{Int64}()
+    err = rd_kafka_query_watermark_offsets(handle.ptr, topic, partition, low, high, timeout_ms)
+    try_throw_kafka_error(err)
+    low[], high[]
+end
+
 function get_topic_name(topic::KafkaTopic)
     ptr = rd_kafka_topic_name(topic.ptr)
     UnsafeString(ptr)
