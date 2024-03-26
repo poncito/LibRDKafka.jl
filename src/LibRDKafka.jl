@@ -194,6 +194,17 @@ function Base.take!(handle::Function, client::KafkaHandle, timeout_ms)
     end
 end
 
+function unsafe_take!(client::KafkaHandle, timeout_ms)
+    rkmessage = rd_kafka_consumer_poll(client.ptr, timeout_ms)
+    if rkmessage == C_NULL
+        nothing
+    else
+        UnsafeKafkaMessage(rkmessage)
+    end
+end
+
+destroy!(message::UnsafeKafkaMessage) = rd_kafka_message_destroy(getfield(message, :ptr))
+
 mutable struct KafkaTopic
     const ptr::Ptr{rd_kafka_topic_t}
     function KafkaTopic(handle::Ptr{rd_kafka_t}, topic, conf::Ptr{rd_kafka_topic_conf_t})
