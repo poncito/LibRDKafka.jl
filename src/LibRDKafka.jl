@@ -243,6 +243,11 @@ function Base.put!(topic::KafkaTopic, key, payload, partition = RD_KAFKA_PARTITI
     topic
 end
 
+function get_topic_name(topic::KafkaTopic)
+    ptr = rd_kafka_topic_name(topic.ptr)
+    UnsafeString(ptr)
+end
+
 # todo:
 # - use blobs
 # - remove string allocation
