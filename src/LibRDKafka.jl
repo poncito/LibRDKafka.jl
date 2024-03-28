@@ -158,7 +158,7 @@ struct UnsafeKafkaMessage
     ptr::Ptr{rd_kafka_message_t}
 end
 
-Base.propertynames(::UnsafeKafkaMessage) = (:payload, :partition, :key, :offset, :timestamp)
+Base.propertynames(::UnsafeKafkaMessage) = (:payload, :partition, :key, :offset, :timestamp, :topicname)
 
 function Base.getproperty(msg::UnsafeKafkaMessage, s::Symbol)
     ptr = getfield(msg, :ptr)
@@ -177,6 +177,8 @@ function Base.getproperty(msg::UnsafeKafkaMessage, s::Symbol)
             time_ms = rd_kafka_message_timestamp(ptr, typeref)
             _epoch2datetime(time_ms)
         end
+    elseif s == :topicname
+        rd_kafka_topic_name(msg.rkt) |> UnsafeString
     else
         error("type UnsafeKafkaMessage has no property $s")
     end
